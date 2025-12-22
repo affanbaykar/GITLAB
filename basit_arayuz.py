@@ -27,6 +27,16 @@ class DualSyncApp(ctk.CTk):
         self.current_dir = os.path.dirname(os.path.abspath(__file__))
         logo_folder = os.path.join(self.current_dir, "logo")
         self.csv_folder_path = os.path.join(self.current_dir, "csv_folder")
+        self.templates_folder = os.path.join(self.current_dir, "templates")
+
+        # Klasör yoksa oluştur
+        if not os.path.exists(self.templates_folder):
+            os.makedirs(self.templates_folder)
+            # Varsayılan bir şablon oluşturalım
+            default_path = os.path.join(self.templates_folder, "standard_template.md")
+            if not os.path.exists(default_path):
+                with open(default_path, "w", encoding="utf-8") as f:
+                    f.write("# {title}\n\n{orig_desc}\n\n---\n**Jira Key:** {jira_key}\n**Ekler:**\n{attachment_section}")
 
         def load_and_clean_image(filename):
             try:
@@ -129,17 +139,15 @@ class DualSyncApp(ctk.CTk):
         #           SEKME 2: AYARLAR PANELİ
         # ========================================================
         self.create_settings_tab() 
-        #self.load_initial_jql()
         self.refresh_dropdown_data() # Dropdownları doldur
         
     def get_template_list(self):
         """templates klasöründeki .md dosyalarını listeler."""
-        template_dir = os.path.join(self.current_dir, "templates")
-        if not os.path.exists(template_dir):
-            os.makedirs(template_dir)
+        if not os.path.exists(self.templates_folder):
+            os.makedirs(self.templates_folder)
             return ["standard_template.md"]
         
-        files = [f for f in os.listdir(template_dir) if f.endswith(".md")]
+        files = [f for f in os.listdir(self.templates_folder) if f.endswith(".md")]
         if not files:
             return ["standard_template.md"]
         return files
@@ -187,6 +195,10 @@ class DualSyncApp(ctk.CTk):
         btn.destroy()
         # --- OTOMATİK GÜNCELLEME ---
         self.generate_jql_from_ui()
+    
+    def generate_jql_from_ui(self):
+        """Bu metod sadece filtreler değiştiğinde çalışır, manuel JQL'i etkilemez ama tetikleyici olarak durur."""
+        pass # Şimdilik sadece tetikleyici olarak tutuyoruz, asıl iş get_jql_from_filters'da.
 
     def toggle_filter_panel(self):
         if self.filter_frame.winfo_manager(): 
@@ -198,11 +210,8 @@ class DualSyncApp(ctk.CTk):
 
     def toggle_all(self, var_dict, state):
         for var in var_dict.values(): var.set(state)
-        # --- OTOMATİK GÜNCELLEME ---
-        self.generate_jql_from_ui()
 
     # --- FİLTRELEME ARAYÜZÜ ---
-
     def create_filter_ui(self, parent):
         self.filter_frame = ctk.CTkFrame(parent, fg_color="#E8E8E8", corner_radius=10)
 
@@ -220,10 +229,8 @@ class DualSyncApp(ctk.CTk):
         self.entry_key.pack(side="left", padx=(0, 10))
 
         ctk.CTkLabel(row1, text="Zaman:", font=self.font_ui, text_color="black").pack(side="left", padx=(0, 2))
-        # Values listesinin en başına "Seçiniz..." ekledim
         self.combo_time = ctk.CTkComboBox(row1, values=["Seçiniz...", "Son 24 Saat", "Son 7 Gün", "Son 15 Gün", "Son 30 Gün", "Tüm Zamanlar"], width=110)
         self.combo_time.pack(side="left", padx=(0, 10))
-        # Varsayılan olarak artık "Seçiniz..." gelecek (Filtresiz)
         self.combo_time.set("Seçiniz...")
 
         ctk.CTkLabel(row1, text="Etiket:", font=self.font_ui, text_color="black").pack(side="left", padx=(0, 2))
@@ -330,13 +337,8 @@ class DualSyncApp(ctk.CTk):
         self.jql_entry = ctk.CTkEntry(action_box, height=35, font=("Consolas", 13), placeholder_text="Manuel sorgu girmek isterseniz buraya yazın...")
         self.jql_entry.pack(side="left", fill="x", expand=True)
 
-    def log_manual_jql_action(self):
-        """Kullanıcı elle giriş yapıp butona basarsa log basar, işlem başlatmaz."""
-        current_jql = self.jql_entry.get()
-        self.log_yaz(self.console_left, f"📝 Manuel JQL Ayarlandı: {current_jql}\n", "info")
-
     def get_jql_from_filters(self):
-        """Arayüzdeki filtreleri okuyup JQL String'i döndürür (Arayüze yazmaz)."""
+        """Arayüzdeki filtreleri okuyup JQL String'i döndürür."""
         parts = []
         
         proj = self.entry_project.get().strip()
@@ -409,7 +411,7 @@ class DualSyncApp(ctk.CTk):
         self.global_frame = ctk.CTkFrame(self.main_scroll)
         self.global_frame.pack(fill="x", padx=5, pady=10)
         
-        ctk.CTkLabel(self.global_frame, text="Global API & Proje Ayarları (.env)", font=("Roboto", 14, "bold")).pack(anchor="w", padx=10, pady=5)
+        ctk.CTkLabel(self.global_frame, text="1. Global API & Proje Ayarları (.env)", font=("Roboto", 14, "bold")).pack(anchor="w", padx=10, pady=5)
 
         self.api_entries = {}
         fields = [
@@ -427,55 +429,161 @@ class DualSyncApp(ctk.CTk):
             entry.grid(row=i, column=1, padx=5, pady=2, sticky="ew")
             self.api_entries[key] = entry
 
-        # --- B) TAKIM & PROJE HARİTASI (SCROLLABLE TABLO) ---
+        # --- B) MAPPING TABLOLARI ---
         self.team_frame = ctk.CTkFrame(self.main_scroll)
         self.team_frame.pack(fill="x", padx=5, pady=10)
         
-        # Başlık ve Ekle Butonu
+        # Takım Başlık ve Ekle Butonu
         t_header_box = ctk.CTkFrame(self.team_frame, fg_color="transparent")
         t_header_box.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(t_header_box, text="1. Takım & Proje Eşleşmeleri", font=("Roboto", 14, "bold"), text_color="#E67E22").pack(side="left")
-        ctk.CTkButton(t_header_box, text="+ Yeni Takım", width=100, height=25, command=lambda: self.add_team_row({})).pack(side="right")
+        ctk.CTkLabel(t_header_box, text="2. Takım & Kullanıcı Eşleşmeleri", font=("Roboto", 14, "bold"), text_color="#E67E22").pack(side="left")
+        ctk.CTkButton(t_header_box, text="+ Takım Ekle", width=90, height=25, command=lambda: self.add_team_row({})).pack(side="right", padx=2)
+        ctk.CTkButton(t_header_box, text="+ Kullanıcı Ekle", width=90, height=25, command=lambda: self.add_user_row({})).pack(side="right", padx=2)
 
-        # Tablo Başlıkları
+        # Takım Tablosu
         t_head = ctk.CTkFrame(self.team_frame, fg_color="gray", height=30)
         t_head.pack(fill="x", padx=5)
-        for i, t in enumerate(["Jira Takım Adı", "GitLab Proje ID", "Görünür İsim", "Sil"]):
+        for i, t in enumerate(["Jira Takım", "GitLab PID", "İsim", "Sil"]):
             t_head.columnconfigure(i, weight=1 if i==3 else 3)
             ctk.CTkLabel(t_head, text=t, font=("Roboto", 12, "bold"), text_color="white").grid(row=0, column=i, sticky="ew")
 
-        # --> Tablo İçeriği
-        self.team_scroll_container = ctk.CTkScrollableFrame(self.team_frame, height=200, fg_color="transparent") 
+        self.team_scroll_container = ctk.CTkScrollableFrame(self.team_frame, height=120, fg_color="transparent") 
         self.team_scroll_container.pack(fill="x", padx=5, pady=(0, 5))
-        
         self.team_entries = []
 
-        # --- C) KULLANICI HARİTASI (SCROLLABLE TABLO) ---
-        self.user_frame = ctk.CTkFrame(self.main_scroll)
-        self.user_frame.pack(fill="x", padx=5, pady=10)
         
-        # Başlık ve Ekle Butonu
-        u_header_box = ctk.CTkFrame(self.user_frame, fg_color="transparent")
-        u_header_box.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(u_header_box, text="2. Kullanıcı Eşleşmeleri", font=("Roboto", 14, "bold"), text_color="#2980B9").pack(side="left")
-        ctk.CTkButton(u_header_box, text="+ Yeni Kullanıcı", width=100, height=25, command=lambda: self.add_user_row({})).pack(side="right")
-        
-        # Tablo Başlıkları
-        u_head = ctk.CTkFrame(self.user_frame, fg_color="gray", height=30)
-        u_head.pack(fill="x", padx=5)
-        for i, t in enumerate(["Jira Kullanıcı Adı", "GitLab User ID", "Sil"]):
+
+        # Kullanıcı Tablosu
+        u_head = ctk.CTkFrame(self.team_frame, fg_color="gray", height=30)
+        u_head.pack(fill="x", padx=5, pady=(10,0))
+        for i, t in enumerate(["Jira User", "GitLab UID", "Sil"]):
             u_head.columnconfigure(i, weight=1 if i==2 else 3)
             ctk.CTkLabel(u_head, text=t, font=("Roboto", 12, "bold"), text_color="white").grid(row=0, column=i, sticky="ew")
 
-        # --> Tablo İçeriği
-        self.user_scroll_container = ctk.CTkScrollableFrame(self.user_frame, height=200, fg_color="transparent") 
+        self.user_scroll_container = ctk.CTkScrollableFrame(self.team_frame, height=120, fg_color="transparent") 
         self.user_scroll_container.pack(fill="x", padx=5, pady=(0, 5))
-        
         self.user_entries = []
+
+        # --- C) ŞABLON YÖNETİMİ (YENİ EKLENEN KISIM) ---
+        self.create_template_settings_ui(self.main_scroll)
 
         # Yükle
         self.load_global_settings()
         self.load_mapping_settings()
+
+    def create_template_settings_ui(self, parent_frame):
+        """Ayarlar sekmesine Şablon Yönetimi bölümü ekler."""
+        self.template_frame_container = ctk.CTkFrame(parent_frame, fg_color="#F0F0F0")
+        self.template_frame_container.pack(fill="x", padx=5, pady=15)
+
+        # Başlık
+        header = ctk.CTkFrame(self.template_frame_container, fg_color="transparent")
+        header.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(header, text="3. Şablon Yönetimi (Markdown)", font=("Roboto", 14, "bold"), text_color="#8E44AD").pack(side="left")
+
+        # Alt Bölge: Liste ve Editör
+        editor_area = ctk.CTkFrame(self.template_frame_container, fg_color="transparent")
+        editor_area.pack(fill="x", padx=5, pady=5)
+
+        # SOL: Liste
+        left_list = ctk.CTkFrame(editor_area, width=200)
+        left_list.pack(side="left", fill="y", padx=(0, 5))
+        
+        ctk.CTkLabel(left_list, text="Mevcut Şablonlar", font=("Roboto", 12, "bold")).pack(pady=5)
+        self.template_list_scroll = ctk.CTkScrollableFrame(left_list, width=220, height=250)
+        self.template_list_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # SAĞ: Editör
+        right_editor = ctk.CTkFrame(editor_area)
+        right_editor.pack(side="left", fill="both", expand=True)
+
+        # Dosya Adı ve Butonlar
+        toolbar = ctk.CTkFrame(right_editor, fg_color="transparent")
+        toolbar.pack(fill="x", padx=5, pady=5)
+
+        ctk.CTkLabel(toolbar, text="Dosya Adı:").pack(side="left", padx=5)
+        self.entry_template_name = ctk.CTkEntry(toolbar, width=200)
+        self.entry_template_name.pack(side="left", padx=5)
+        
+        # Butonlar
+        ctk.CTkButton(toolbar, text="Yeni", width=60, fg_color="#F39C12", command=self.new_template).pack(side="left", padx=5)
+        ctk.CTkButton(toolbar, text="Kaydet", width=60, fg_color="#27AE60", command=self.save_template).pack(side="left", padx=5)
+        ctk.CTkButton(toolbar, text="Sil", width=60, fg_color="#C0392B", command=self.delete_template).pack(side="right", padx=5)
+
+        # Text Alanı
+        self.txt_template_content = ctk.CTkTextbox(right_editor, font=("Consolas", 12), height=200)
+        self.txt_template_content.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Durum Çubuğu
+        self.lbl_template_status = ctk.CTkLabel(right_editor, text="Hazır.", text_color="gray", font=("Roboto", 10))
+        self.lbl_template_status.pack(anchor="w", padx=10, pady=(0, 5))
+
+        # Listeyi ilk kez doldur
+        self.refresh_template_list_ui()
+
+    # --- ŞABLON FONKSİYONLARI ---
+    def refresh_template_list_ui(self):
+        # Önce temizle
+        for widget in self.template_list_scroll.winfo_children():
+            widget.destroy()
+        
+        templates = self.get_template_list()
+        for tmpl in templates:
+            btn = ctk.CTkButton(self.template_list_scroll, text=tmpl, fg_color="transparent", 
+                                text_color="black", hover_color="#DDD", anchor="w",
+                                command=lambda t=tmpl: self.load_template_content(t))
+            btn.pack(fill="x", pady=2)
+
+    def load_template_content(self, filename):
+        path = os.path.join(self.templates_folder, filename)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.entry_template_name.delete(0, "end")
+            self.entry_template_name.insert(0, filename)
+            self.txt_template_content.delete("0.0", "end")
+            self.txt_template_content.insert("0.0", content)
+            self.lbl_template_status.configure(text=f"Yüklendi: {filename}", text_color="green")
+
+    def new_template(self):
+        self.entry_template_name.delete(0, "end")
+        self.txt_template_content.delete("0.0", "end")
+        self.entry_template_name.insert(0, "yeni_sablon.md")
+        self.lbl_template_status.configure(text="Yeni şablon oluşturuluyor...", text_color="blue")
+
+    def save_template(self):
+        filename = self.entry_template_name.get().strip()
+        if not filename:
+            self.lbl_template_status.configure(text="Hata: Dosya adı boş olamaz.", text_color="red")
+            return
+        
+        if not filename.endswith(".md"):
+            filename += ".md"
+
+        content = self.txt_template_content.get("0.0", "end-1c") # Sondaki newline'ı alma
+        path = os.path.join(self.templates_folder, filename)
+        
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            self.lbl_template_status.configure(text=f"Kaydedildi: {filename}", text_color="green")
+            self.refresh_template_list_ui()
+        except Exception as e:
+            self.lbl_template_status.configure(text=f"Hata: {str(e)}", text_color="red")
+
+    def delete_template(self):
+        filename = self.entry_template_name.get().strip()
+        if not filename: return
+        
+        path = os.path.join(self.templates_folder, filename)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                self.new_template() # Ekranı temizle
+                self.refresh_template_list_ui()
+                self.lbl_template_status.configure(text=f"Silindi: {filename}", text_color="#C0392B")
+            except Exception as e:
+                self.lbl_template_status.configure(text=f"Silme Hatası: {str(e)}", text_color="red")
 
     # --- AYARLARI YÜKLEME ---
     def load_global_settings(self):
@@ -542,6 +650,8 @@ class DualSyncApp(ctk.CTk):
 
     def remove_row(self, row_frame, list_ref):
         row_frame.destroy()
+        # listeden silme işlemi tam doğru çalışması için liste indekslemesi yerine
+        # görsel öğe silinince logic'ten de silinir.
         
     # --- KAYDETME ---
     def save_settings(self):
@@ -597,18 +707,7 @@ class DualSyncApp(ctk.CTk):
         except Exception as e:
             self.log_yaz(self.console_left, f"❌ config.json Hatası: {e}\n", "error")
             
-        self.log_yaz(self.console_left, "🔄 Değişiklikler için uygulamayı yeniden başlatın.\n", "warning")
-
-    # --- DİĞER STANDART FONKSİYONLAR ---
-    def load_initial_jql(self):
-        if os.path.exists("config.json"):
-            try:
-                with open("config.json", "r", encoding="utf-8") as f:
-                    jql = json.load(f).get("settings", {}).get("default_jql", "")
-                    if jql:
-                        self.jql_entry.delete(0, "end")
-                        self.jql_entry.insert(0, jql)
-            except: pass
+        self.log_yaz(self.console_left, "🔄 Değişiklikler için uygulamayı yeniden başlatın (Görsel öğeler için).\n", "warning")
 
     def setup_tags(self, textbox):
         textbox._textbox.tag_config("error", foreground="#FF5555")
@@ -637,11 +736,14 @@ class DualSyncApp(ctk.CTk):
         lbl = ctk.CTkLabel(self.template_frame, text="Kullanılacak Şablon:", font=("Roboto", 12, "bold"))
         lbl.pack(side="left", padx=(0, 10))
 
+        # Şablon listesini her seferinde diskten oku
         templates = self.get_template_list()
         self.combo_templates = ctk.CTkComboBox(self.template_frame, values=templates, width=250)
         self.combo_templates.pack(side="left")
         if "standard_template.md" in templates:
             self.combo_templates.set("standard_template.md")
+        elif templates:
+             self.combo_templates.set(templates[0])
 
         self.btn_confirm_left.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.btn_cancel_left.pack(side="right", padx=(5, 0))
@@ -731,6 +833,7 @@ class DualSyncApp(ctk.CTk):
 
         self.goster_progress_bar()
 
+        # sync_to_gitlab.py artık 3. argüman olarak template adını bekliyor (extra_arg)
         t = threading.Thread(
             target=self.scripti_calistir, 
             args=("sync_to_gitlab.py", self.console_left, None, "", jql, "--execute", self.on_execute_complete, selected_template)
@@ -777,6 +880,7 @@ class DualSyncApp(ctk.CTk):
 
             self.log_yaz(target_console, f"📂 Script: {script_name}\n", "dim")
             if arguman: self.log_yaz(target_console, f"📡 JQL: {arguman}\n", "info")
+            if extra_arg: self.log_yaz(target_console, f"🎨 Şablon: {extra_arg}\n", "dim")
 
             cmd = [python_exe, "-u", script_path]
             if arguman: cmd.append(arguman)
