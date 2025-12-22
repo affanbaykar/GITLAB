@@ -4,6 +4,10 @@ import json
 from dotenv import load_dotenv
 import time
 import pandas as pd
+import sys
+
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 
 load_dotenv()
 
