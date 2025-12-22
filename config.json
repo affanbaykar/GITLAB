@@ -1,0 +1,32 @@
+{
+  "team_mappings": [
+    {
+      "jira_team_name": "affan.bugra.ozaytas",
+      "gitlab_project_id": 76377017,
+      "friendly_name": "GYT Test ve Otomasyon"
+    },
+    {
+      "jira_team_name": "merve.yucetas",
+      "gitlab_project_id": 76376997,
+      "friendly_name": "GYT Proje Yönetimi"
+    },
+    {
+      "jira_team_name": "metin.durmus",
+      "gitlab_project_id": 76377031,
+      "friendly_name": "GYT Simülasyon"
+    }
+  ],
+  "user_mappings": [
+    {
+      "jira_user": "affan.bugra.ozaytas",
+      "gitlab_user_id": 31073378
+    },
+    {
+      "jira_user": "merve.yucetas",
+      "gitlab_user_id": 31250282
+    }
+  ],
+  "settings": {
+    "default_jql": "project = GYT..."
+  }
+}

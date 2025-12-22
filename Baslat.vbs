@@ -1,0 +1,1 @@
+CreateObject("Wscript.Shell").Run "pythonw basit_arayuz.py", 0, False
