@@ -10,6 +10,9 @@ import sys
 import json
 import tempfile 
 
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+    
 # .env dosyasını yükle
 load_dotenv()
 

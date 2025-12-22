@@ -8,6 +8,10 @@ import json
 from dotenv import load_dotenv
 from PIL import Image
 
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+    
+
 # Görünüm Ayarları
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
@@ -23,8 +27,14 @@ class DualSyncApp(ctk.CTk):
         self.font_console = ("JetBrains Mono", 12)
         self.font_ui = ("Roboto", 12)
 
-        # --- RESİM VE KLASÖR AYARLARI ---
-        self.current_dir = os.path.dirname(os.path.abspath(__file__))
+        # --- DÜZELTİLEN YOL MANTIĞI ---
+        if getattr(sys, 'frozen', False):
+            # Exe ise exe'nin olduğu klasör
+            self.current_dir = os.path.dirname(sys.executable)
+        else:
+            # Değilse dosyanın olduğu klasör
+            self.current_dir = os.path.dirname(os.path.abspath(__file__))
+            
         logo_folder = os.path.join(self.current_dir, "logo")
         self.csv_folder_path = os.path.join(self.current_dir, "csv_folder")
         self.templates_folder = os.path.join(self.current_dir, "templates")
@@ -874,15 +884,29 @@ class DualSyncApp(ctk.CTk):
     def scripti_calistir(self, script_name, target_console, target_btn, btn_reset_text, arguman=None, mode_flag=None, callback=None, extra_arg=None):
         full_output = ""
         try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            script_path = os.path.join(current_dir, script_name)
-            python_exe = sys.executable
+            # --- DÜZELTİLEN KISIM (Path Fix) ---
+            if getattr(sys, 'frozen', False):
+                # Eğer EXE olarak çalışıyorsak, EXE'nin bulunduğu gerçek klasörü al
+                application_path = os.path.dirname(sys.executable)
+                
+                # .py uzantısını .exe yap
+                exe_name = script_name.replace(".py", ".exe")
+                script_path = os.path.join(application_path, exe_name)
+                
+                # Komut listesini oluştur
+                cmd = [script_path]
+            else:
+                # Normal .py olarak çalışıyorsak dosyanın olduğu klasörü al
+                application_path = os.path.dirname(os.path.abspath(__file__))
+                script_path = os.path.join(application_path, script_name)
+                python_exe = sys.executable
+                cmd = [python_exe, "-u", script_path]
+            # -----------------------------------
 
-            self.log_yaz(target_console, f"📂 Script: {script_name}\n", "dim")
+            self.log_yaz(target_console, f"📂 Çalıştırılıyor: {script_name}\n", "dim")
             if arguman: self.log_yaz(target_console, f"📡 JQL: {arguman}\n", "info")
             if extra_arg: self.log_yaz(target_console, f"🎨 Şablon: {extra_arg}\n", "dim")
 
-            cmd = [python_exe, "-u", script_path]
             if arguman: cmd.append(arguman)
             if mode_flag: cmd.append(mode_flag)
             if extra_arg: cmd.append(extra_arg)
@@ -890,7 +914,13 @@ class DualSyncApp(ctk.CTk):
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
 
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, cwd=current_dir, encoding='utf-8', errors='replace', env=env)
+            creation_flags = 0
+            if os.name == 'nt':
+                creation_flags = 0x08000000 
+
+            # cwd=application_path yaptık ki dosyaları (logo, csv) doğru yerde arasın
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, cwd=application_path, encoding='utf-8', errors='replace', env=env, creationflags=creation_flags)
+            
             progress_pattern = re.compile(r"--- (\d+)/(\d+):")
 
             for line in process.stdout: 
@@ -913,10 +943,14 @@ class DualSyncApp(ctk.CTk):
 
         except Exception as e: 
             self.log_yaz(target_console, f"\n❌ Kritik Hata: {e}\n", "error")
+            # Hata durumunda yol bilgisini de ekrana yazdıralım ki sorunu görelim
+            if 'script_path' in locals():
+                self.log_yaz(target_console, f"Aranan Yol: {script_path}\n", "dim")
+            
             if target_btn: target_btn.configure(state="normal")
         finally: 
             if target_btn and mode_flag != "--execute": target_btn.configure(state="normal", text=btn_reset_text)
-
+    
     def akilli_log_yaz(self, console, line):
         tag = "normal"
         if "❌" in line or "Hata" in line: tag = "error"

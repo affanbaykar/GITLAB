@@ -4,6 +4,10 @@ import os
 from dotenv import load_dotenv
 import sys
 
+# Windows konsolunda emoji hatasını önlemek için UTF-8 zorlaması
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+                           
 # .env dosyasını yükle
 load_dotenv()
 
