@@ -83,6 +83,19 @@ class DualSyncApp(ctk.CTk):
                                         command=self.toggle_filter_panel)
         self.btn_toggle_filter.pack(fill="x", padx=10, pady=(5, 0))
 
+        # --- MEVCUT KODUNUN İÇİNE EKLE ---
+        # Filtre butonunun hemen altına veya yanına bu anahtarı ekle
+        self.debug_var = ctk.BooleanVar(value=False)
+        self.switch_debug = ctk.CTkSwitch(
+            self.tab_main, 
+            text="🐞 Detaylı Hata Raporu (Debug Mode)", 
+            variable=self.debug_var, 
+            progress_color="#E67E22"
+        )
+        self.switch_debug.pack(anchor="ne", padx=20, pady=(0, 10)) # Sağ üst köşeye koyar
+
+
+
         # Filtre arayüzünü oluştur (ancak henüz pack etme, toggle yönetecek)
         self.create_filter_ui(self.tab_main) 
         self.filter_frame.pack_forget() # Başlangıçta gizli
@@ -816,11 +829,16 @@ class DualSyncApp(ctk.CTk):
         self.btn_left.configure(state="disabled", text="⏳ VERİ ÇEKİLİYOR...")
         self.action_frame.pack_forget()
 
+        # Debug anahtarının durumunu oku
+        debug_komutu = "--debug" if self.debug_var.get() else "--normal"
+        
         t = threading.Thread(
             target=self.scripti_calistir, 
-            args=("sync_to_gitlab.py", self.console_left, self.btn_left, "AKTARIMI BAŞLAT (ÖN İZLEME)", jql, "--preview", self.on_preview_complete)
+            # En sona 'debug_komutu' değişkenini ekledik
+            args=("sync_to_gitlab.py", self.console_left, self.btn_left, "AKTARIMI BAŞLAT (ÖN İZLEME)", jql, "--preview", self.on_preview_complete, None, debug_komutu)
         )
         t.start()
+
 
     def basit_sol_thread_execute(self):
         # --- KARAR MEKANİZMASI ---
@@ -844,11 +862,17 @@ class DualSyncApp(ctk.CTk):
         self.goster_progress_bar()
 
         # sync_to_gitlab.py artık 3. argüman olarak template adını bekliyor (extra_arg)
+        # Debug anahtarının durumunu oku
+        debug_komutu = "--debug" if self.debug_var.get() else "--normal"
+        
         t = threading.Thread(
             target=self.scripti_calistir, 
-            args=("sync_to_gitlab.py", self.console_left, None, "", jql, "--execute", self.on_execute_complete, selected_template)
+            # En sona 'debug_komutu' değişkenini ekledik
+            args=("sync_to_gitlab.py", self.console_left, None, "", jql, "--execute", self.on_execute_complete, selected_template, debug_komutu)
         )
         t.start()
+
+
       
     def on_preview_complete(self, return_code, output_text):
         if return_code != 0:
@@ -878,48 +902,56 @@ class DualSyncApp(ctk.CTk):
     def baslat_sag_thread(self):
         self.btn_right.configure(state="disabled", text="⏳ GİTLAB BAĞLANIYOR...")
         self.console_right.delete("0.0", "end")
-        t = threading.Thread(target=self.scripti_calistir, args=("sync_gitlab_status_to_jira.py", self.console_right, self.btn_right, "STATÜLERİ GÜNCELLE"))
+        debug_komutu = "--debug" if self.debug_var.get() else "--normal"
+        
+        t = threading.Thread(
+            target=self.scripti_calistir, 
+            # 3 tane None geçtik çünkü (arguman, mode, callback, extra_arg) bu fonksiyonda yok, sırayı bozmamak için boş geçiyoruz.
+            args=("sync_gitlab_status_to_jira.py", self.console_right, self.btn_right, "STATÜLERİ GÜNCELLE", None, None, None, None, debug_komutu)
+        )
         t.start()
 
-    def scripti_calistir(self, script_name, target_console, target_btn, btn_reset_text, arguman=None, mode_flag=None, callback=None, extra_arg=None):
+    def scripti_calistir(self, script_name, target_console, target_btn, btn_reset_text, arguman=None, mode_flag=None, callback=None, extra_arg=None, debug_mode=None):
         full_output = ""
         try:
-            # --- DÜZELTİLEN KISIM (Path Fix) ---
+            # --- 1. DOSYA YOLU BELİRLEME ---
             if getattr(sys, 'frozen', False):
-                # Eğer EXE olarak çalışıyorsak, EXE'nin bulunduğu gerçek klasörü al
-                application_path = os.path.dirname(sys.executable)
-                
-                # .py uzantısını .exe yap
+                # EXE ise
+                app_path = os.path.dirname(sys.executable)
                 exe_name = script_name.replace(".py", ".exe")
-                script_path = os.path.join(application_path, exe_name)
-                
-                # Komut listesini oluştur
+                script_path = os.path.join(app_path, exe_name)
                 cmd = [script_path]
             else:
-                # Normal .py olarak çalışıyorsak dosyanın olduğu klasörü al
-                application_path = os.path.dirname(os.path.abspath(__file__))
-                script_path = os.path.join(application_path, script_name)
-                python_exe = sys.executable
-                cmd = [python_exe, "-u", script_path]
-            # -----------------------------------
+                # Normal .py ise
+                app_path = os.path.dirname(os.path.abspath(__file__))
+                script_path = os.path.join(app_path, script_name)
+                cmd = [sys.executable, "-u", script_path]
 
-            self.log_yaz(target_console, f"📂 Çalıştırılıyor: {script_name}\n", "dim")
-            if arguman: self.log_yaz(target_console, f"📡 JQL: {arguman}\n", "info")
-            if extra_arg: self.log_yaz(target_console, f"🎨 Şablon: {extra_arg}\n", "dim")
-
+            # --- 2. ARGÜMANLARI EKLE (Tek ve Ortak Yer) ---
             if arguman: cmd.append(arguman)
             if mode_flag: cmd.append(mode_flag)
             if extra_arg: cmd.append(extra_arg)
+            if debug_mode: cmd.append(debug_mode)  # Debug bayrağı buraya eklendi
+
+            # --- 3. LOGLAMA ---
+            self.log_yaz(target_console, f"📂 Çalıştırılıyor: {script_name}\n", "dim")
+            if arguman: self.log_yaz(target_console, f"📡 JQL: {arguman}\n", "info")
+            if extra_arg: self.log_yaz(target_console, f"🎨 Şablon: {extra_arg}\n", "dim")
+            
+            # Casus Log: Gerçekten giden komutu gör
+            #if debug_mode:
+                #self.log_yaz(target_console, f"🔧 GİDEN KOMUT: {cmd}\n", "warning")
 
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
-
+            
             creation_flags = 0
             if os.name == 'nt':
                 creation_flags = 0x08000000 
 
-            # cwd=application_path yaptık ki dosyaları (logo, csv) doğru yerde arasın
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, cwd=application_path, encoding='utf-8', errors='replace', env=env, creationflags=creation_flags)
+            # --- 4. SUBPROCESS BAŞLAT ---
+            # cwd=app_path çok önemli, dosyaları (logo, csv) doğru yerde aramasını sağlar
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, cwd=app_path, env=env, creationflags=creation_flags, encoding='utf-8', errors='replace')
             
             progress_pattern = re.compile(r"--- (\d+)/(\d+):")
 
@@ -943,13 +975,13 @@ class DualSyncApp(ctk.CTk):
 
         except Exception as e: 
             self.log_yaz(target_console, f"\n❌ Kritik Hata: {e}\n", "error")
-            # Hata durumunda yol bilgisini de ekrana yazdıralım ki sorunu görelim
             if 'script_path' in locals():
                 self.log_yaz(target_console, f"Aranan Yol: {script_path}\n", "dim")
             
             if target_btn: target_btn.configure(state="normal")
         finally: 
             if target_btn and mode_flag != "--execute": target_btn.configure(state="normal", text=btn_reset_text)
+
     
     def akilli_log_yaz(self, console, line):
         tag = "normal"

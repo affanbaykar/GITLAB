@@ -19,107 +19,126 @@ JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
 CSV_FOLDER = "csv_folder"
 UPLOADED_FILE = os.path.join(CSV_FOLDER, "jira_uploaded.csv")  
 
-GITLAB_HEADERS = {
-    "PRIVATE-TOKEN": GITLAB_TOKEN,
-    "Content-Type": "application/json"
-}
-
+GITLAB_HEADERS = {"PRIVATE-TOKEN": GITLAB_TOKEN, "Content-Type": "application/json"}
 JIRA_HEADERS = {
     "Authorization": f"Bearer {JIRA_API_TOKEN}",
     "Content-Type": "application/json",
     "Accept": "application/json"
 }
 
-# HEDEF STATÜLER
+# --- DEBUG YÖNETİMİ ---
+DEBUG_MODE = False
+if "--debug" in sys.argv:
+    DEBUG_MODE = True
+    print("🐞 DEBUG MODU AKTİF: Status geçişleri detaylı incelenecek...")
+
 TARGET_STATUS_NAMES = ["Done", "Closed", "Bitti", "Tamamlandı", "Kapalı", "Çözülmüş"]
 INTERMEDIATE_STATUS_NAMES = ["In Progress", "Devam", "Devam Ediyor", "Yapılıyor"]
 
+def debug_print(msg):
+    if DEBUG_MODE: print(f"   🐛 [DEBUG] {msg}")
+
 def get_closed_gitlab_issues(project_id):
+    debug_print(f"GitLab kapalı issue'lar çekiliyor... (PID: {project_id})")
     url = f"https://gitlab.com/api/v4/projects/{project_id}/issues?state=closed&per_page=100"
     r = requests.get(url, headers=GITLAB_HEADERS)
-    return r.json() if r.status_code == 200 else []
+    if r.status_code == 200:
+        data = r.json()
+        debug_print(f"GitLab'den {len(data)} adet kapalı issue geldi.")
+        return data
+    else:
+        print(f"❌ GitLab Bağlantı Hatası: {r.status_code} - {r.text}")
+        return []
 
 def get_jira_issue_status(jira_key):
     url = f"{JIRA_URL}/rest/api/2/issue/{jira_key}?fields=status"
     r = requests.get(url, headers=JIRA_HEADERS)
     if r.status_code == 200:
-        return r.json()['fields']['status']['name']
+        stat = r.json()['fields']['status']['name']
+        debug_print(f"{jira_key} Mevcut Status: {stat}")
+        return stat
+    print(f"❌ HATA: Jira status alınamadı ({jira_key}): {r.status_code}")
+    debug_print(f"Hata Detayı: {r.text}")
     return None
 
 def execute_transition(jira_key, transition_id):
-    """Verilen ID ile statü değişikliği yapar."""
     url = f"{JIRA_URL}/rest/api/2/issue/{jira_key}/transitions"
     payload = {"transition": {"id": transition_id}}
     r = requests.post(url, headers=JIRA_HEADERS, json=payload)
-    return r.status_code in [200, 204]
+    if r.status_code in [200, 204]: return True
+    debug_print(f"Geçiş başarısız (ID: {transition_id}): {r.text}")
+    return False
 
-def find_transition_id(jira_key, possible_status_names):
-    """Belirtilen isimlerden herhangi birine giden transition ID'sini bulur."""
+def find_transition_id(jira_key, possible_status_names, verbose=False):
     url = f"{JIRA_URL}/rest/api/2/issue/{jira_key}/transitions"
     r = requests.get(url, headers=JIRA_HEADERS)
-    if r.status_code != 200:
-        return None
+    if r.status_code != 200: return None
     
     transitions = r.json().get("transitions", [])
     
-    # Debug için mevcut yollar
-    # print(f"   (Debug) {jira_key} için yollar: {[t['to']['name'] for t in transitions]}")
+    # Debug açıksa veya verbose istenirse tüm yolları göster
+    if verbose or DEBUG_MODE:
+        available = [f"{t['id']}->{t['to']['name']}" for t in transitions]
+        debug_print(f"{jira_key} için mevcut yollar: {available}")
 
     for t in transitions:
-        if t['to']['name'] in possible_status_names:
+        # Büyük küçük harf duyarsız kontrol
+        if any(target.lower() == t['to']['name'].lower() for target in possible_status_names):
             return t['id']
     return None
 
 def smart_transition_to_done(jira_key):
-    print(f"   Checking direct path to Done for {jira_key}...")
-    direct_id = find_transition_id(jira_key, TARGET_STATUS_NAMES)
+    print(f"   Analiz ediliyor: {jira_key} -> Hedef: {TARGET_STATUS_NAMES}")
     
+    # 1. Direkt Yol
+    direct_id = find_transition_id(jira_key, TARGET_STATUS_NAMES, verbose=False)
     if direct_id:
         print(f"   🚀 Direkt yol bulundu (ID: {direct_id}).")
         if execute_transition(jira_key, direct_id):
-            print("   ✅ İŞLEM TAMAM: Closed/Done.")
+            print("   ✅ İŞLEM TAMAM: Statü güncellendi.")
+            update_csv_status(jira_key)
             return
 
-    # 2. ADIM
-    print("   ⚠️ Direkt yol yok. 'Devam' (Intermediate) yolu aranıyor...")
-    intermediate_id = find_transition_id(jira_key, INTERMEDIATE_STATUS_NAMES)
+    debug_print("Direkt yol yok. Ara durak (Intermediate) aranıyor...")
     
+    # 2. Ara Durak
+    intermediate_id = find_transition_id(jira_key, INTERMEDIATE_STATUS_NAMES)
     if intermediate_id:
-        print(f"   🔄 Ara durak bulundu (ID: {intermediate_id}). Önce 'Devam'a çekiliyor...")
+        print(f"   🔄 Ara durak bulundu (ID: {intermediate_id}). Önce buraya alınıyor...")
         if execute_transition(jira_key, intermediate_id):
-            print("   ✔️ 'Devam' statüsüne alındı. Bekleniyor...")
-            
+            print("   ✔️ Ara durağa alındı. 2 saniye bekleniyor...")
             time.sleep(2) 
             
-            # --- DEBUG BAŞLANGICI ---
-            print(f"\n   🕵️  DEBUG: {jira_key} şu an 'In Progress'te. Peki buradan nereye gidilebilir?")
-            url = f"{JIRA_URL}/rest/api/2/issue/{jira_key}/transitions"
-            temp_r = requests.get(url, headers=JIRA_HEADERS)
-            available = temp_r.json().get("transitions", [])
+            # Şimdi tekrar Done arıyoruz
+            final_id = find_transition_id(jira_key, TARGET_STATUS_NAMES, verbose=True)
             
-            print(f"   👉 Mevcut Seçenekler:")
-            for t in available:
-                print(f"      - ID: {t['id']} | Name: {t['name']} -> Gideceği Yer: {t['to']['name']}")
-            print("   --------------------------------------------------\n")
-            # --- DEBUG BİTİŞİ ---
-
-            final_id = find_transition_id(jira_key, TARGET_STATUS_NAMES)
-            print(f"   🧐 Aranan Hedef ID (final_id): {final_id}") # Burası None dönüyor diyorsun
-
             if final_id:
                 if execute_transition(jira_key, final_id):
                     print("   ✅✅ İŞLEM TAMAM: Başarıyla kapatıldı.")
-                    df = pd.read_csv(UPLOADED_FILE)
-                    row_number = df.index[df["Issue key"] == jira_key][0]
-                    df.loc[row_number, "Status"] = "Çözülmüş"
-                    df.to_csv(UPLOADED_FILE, index=False, encoding="utf-8-sig")
-                    print("f{jira_key} uploaded_file de status=çözülmüş olarak güncellendi." )
-        
+                    update_csv_status(jira_key)
                 else:
-                    print("   ❌ HATA: 'Done' yapılamadı.")
+                    print("   ❌ HATA: Son adımda statü değiştirilemedi.")
             else:
-                print("   ❌ HATA: Hedef statüye uygun geçiş bulunamadı. (Yukarıdaki listeyi kontrol et)")
-           
+                print("   ❌ HATA: Ara durağa geldik ama buradan hedefe yol yok.")
+                if DEBUG_MODE:
+                    print("   👉 Config dosyasındaki statü isimlerini kontrol edin.")
+    else:
+        print("   ❌ HATA: Ne direkt ne de dolaylı yol bulundu.")
+        # Kullanıcıya mevcut yolları gösterelim ki hatayı görsün
+        find_transition_id(jira_key, [], verbose=True)
+
+def update_csv_status(jira_key):
+    try:
+        if os.path.exists(UPLOADED_FILE):
+            df = pd.read_csv(UPLOADED_FILE)
+            if jira_key in df["Issue key"].values:
+                idx = df.index[df["Issue key"] == jira_key][0]
+                df.at[idx, "Status"] = "Çözülmüş"
+                df.to_csv(UPLOADED_FILE, index=False, encoding="utf-8-sig")
+                debug_print(f"CSV güncellendi: {jira_key} -> Çözülmüş")
+    except Exception as e:
+        debug_print(f"CSV güncelleme hatası: {e}")
+
 def extract_jira_key_from_labels(labels):
     for label in labels:
         if "-" in label and label.split("-")[0].isupper() and label.split("-")[1].isdigit():
@@ -129,7 +148,12 @@ def extract_jira_key_from_labels(labels):
 if __name__ == "__main__":
     print("🔄 Zeki GitLab -> Jira Status Senkronizasyonu Başlıyor...\n")
     
-    closed_issues = get_closed_gitlab_issues(MASTER_PROJECT_ID)
+    try:
+        closed_issues = get_closed_gitlab_issues(MASTER_PROJECT_ID)
+    except Exception as e:
+        print(f"❌ GitLab Bağlantı Hatası: {e}")
+        sys.exit(1)
+
     print(f"🔎 GitLab Master Projede {len(closed_issues)} kapalı issue bulundu.")
     
     for issue in closed_issues:
@@ -137,25 +161,17 @@ if __name__ == "__main__":
         labels = issue.get('labels', [])
         jira_key = extract_jira_key_from_labels(labels)
         
-        if not jira_key:
-            continue
+        if not jira_key: continue
             
         print(f"\n--- İşleniyor: GitLab #{gitlab_iid} -> Jira {jira_key} ---")
         
         current_jira_status = get_jira_issue_status(jira_key)
         
-        if not current_jira_status:
-            print("❌ Jira statusu okunamadı.")
-            continue
+        if not current_jira_status: continue
             
-        if current_jira_status in TARGET_STATUS_NAMES:
+        if any(s.lower() == current_jira_status.lower() for s in TARGET_STATUS_NAMES):
             print(f"ℹ️  Jira zaten kapalı ({current_jira_status}).")
-            df = pd.read_csv(UPLOADED_FILE)
-            row_number = df.index[df["Issue key"] == jira_key][0]
-            df.loc[row_number, "Status"] = "Çözülmüş"
-            df.to_csv(UPLOADED_FILE, index=False, encoding="utf-8-sig")
-            print("f{jira_key} uploaded_file de status=çözülmüş olarak güncellendi." )
+            update_csv_status(jira_key)
             continue
         
-        # Fonksiyonu çağır
-        smart_transition_to_done(jira_key)  
+        smart_transition_to_done(jira_key)
