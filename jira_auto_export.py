@@ -3,45 +3,47 @@ import csv
 import os
 from dotenv import load_dotenv
 import sys
+import json
 
 # Windows konsolunda emoji hatasını önlemek için UTF-8 zorlaması
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
                            
-# .env dosyasını yükle
 load_dotenv()
 
-# Ortam değişkenlerini al
 JIRA_URL = os.getenv("JIRA_URL")
-JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN") # Buraya PAT (Personal Access Token) gelecek
+JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
 
-# Çıktı klasörü ve dosya yolu
 OUTPUT_FOLDER = "csv_folder"
 OUTPUT_FILE = os.path.join(OUTPUT_FOLDER, "jira_latest.csv")
-
-# Jira API Endpoint
 SEARCH_URL = f"{JIRA_URL}/rest/api/2/search"
 
-def fetch_jira_csv(jql_query=""):
+def debug_print(msg, debug_mode):
+    if debug_mode:
+        print(f"   🐛 [DEBUG] {msg}")
+
+def fetch_jira_csv(jql_query="", debug_mode=False):
     """
-    Jira'dan verilen JQL sorgusuna göre issue'ları çeker ve CSV'ye yazar.
-    Artık 'Attachment' (Dosya Ekleri) bilgisini de çekiyor.
+    Jira'dan verileri çeker. Debug modu açıksa her adımı raporlar.
     """
+    print(f"🔄 Jira Veri Çekme İşlemi Başlatıldı... (Debug: {'AÇIK' if debug_mode else 'KAPALI'})")
     
-    # Klasör yoksa oluştur
+    debug_print(f"Hedef URL: {JIRA_URL}", debug_mode)
+    debug_print(f"Kullanılan JQL: {jql_query}", debug_mode)
+
     if not os.path.exists(OUTPUT_FOLDER):
         os.makedirs(OUTPUT_FOLDER)
+        debug_print(f"Klasör oluşturuldu: {OUTPUT_FOLDER}", debug_mode)
 
-    # 1. API İsteği Hazırlığı
-    # 'fields' parametresine 'attachment' ekledik!
+    # İstenen alanlar
+    fields_to_fetch = "key,summary,description,status,assignee,priority,created,duedate,customfield_10601,labels,timetracking,attachment"
+    
     params = {
         "jql": jql_query,
         "maxResults": 100,
-        "fields": "key,summary,description,status,assignee,priority,created,duedate,customfield_10601,labels,timetracking,attachment" 
+        "fields": fields_to_fetch
     }
     
-    # --- YENİ YETKİLENDİRME (Bearer Token) ---
-    # Az önce testte çalışan yöntem budur.
     headers = {
         "Authorization": f"Bearer {JIRA_API_TOKEN}",
         "Content-Type": "application/json",
@@ -49,19 +51,26 @@ def fetch_jira_csv(jql_query=""):
     }
 
     try:
-        #print(f"🔄 Jira Sorgusu Çalıştırılıyor: {jql_query}")
-        # auth=(...) yerine headers=headers kullanıyoruz
+        debug_print("API İsteği gönderiliyor...", debug_mode)
         response = requests.get(SEARCH_URL, headers=headers, params=params)
         
+        debug_print(f"API Cevap Kodu: {response.status_code}", debug_mode)
+
         if response.status_code != 200:
-            print(f"❌ Jira API Hatası: {response.status_code} {response.text}")
+            print(f"❌ Jira API Bağlantı Hatası! Kod: {response.status_code}")
+            print(f"   Detay: {response.text}")
             return 0
 
         data = response.json()
         issues = data.get("issues", [])
         
+        debug_print(f"Çekilen Ham Issue Sayısı: {len(issues)}", debug_mode)
+        
         if not issues:
-            print("⚠️ Sorgu sonucu boş döndü (0 issue).")
+            print("⚠️ UYARI: Sorgu çalıştı ama 0 kayıt döndü.")
+            if debug_mode:
+                print("   👉 İpucu: JQL tarih aralığını veya Proje ismini kontrol et.")
+            
             # Boş dosya oluştur (Hata almamak için)
             with open(OUTPUT_FILE, mode='w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
@@ -70,11 +79,29 @@ def fetch_jira_csv(jql_query=""):
                                  "Labels", "Original Estimate", "Time Spent", "Attachments"])
             return 0
 
-        # 2. CSV Yazma İşlemi
+        # --- DETAYLI SÜTUN KONTROLÜ (X-RAY) ---
+        if debug_mode and issues:
+            print("   🔎 [X-RAY] İlk kaydın sütunları inceleniyor...")
+            sample_fields = issues[0].get("fields", {})
+            
+            # Kritik alan kontrolü
+            check_list = {
+                "customfield_10601": "İlgili Stajyerler",
+                "priority": "Öncelik",
+                "status": "Statü",
+                "assignee": "Atanan Kişi"
+            }
+            
+            for field_key, field_name in check_list.items():
+                if field_key not in sample_fields:
+                    print(f"   🚩 [UYARI] '{field_name}' ({field_key}) alanı Jira'dan gelen veride YOK! (None döndü)")
+                else:
+                    val = sample_fields.get(field_key)
+                    print(f"      ✅ {field_name} okundu. Örnek Veri: {val if val else 'Boş'}")
+
+        # CSV Yazma
         with open(OUTPUT_FILE, mode='w', newline='', encoding='utf-8-sig') as file:
             writer = csv.writer(file)
-            
-            # Başlık Satırı (Attachments eklendi)
             headers = ["Issue key", "Summary", "Description", "Status", "Assignee", 
                        "Priority", "Created", "Due Date", "İlgili Stajyerler", 
                        "Labels", "Original Estimate", "Time Spent", "Attachments"]
@@ -83,65 +110,55 @@ def fetch_jira_csv(jql_query=""):
             for issue in issues:
                 fields = issue.get("fields", {})
                 
-                # --- Temel Alanlar ---
                 key = issue.get("key")
                 summary = fields.get("summary", "")
                 description = fields.get("description", "")
                 status = fields.get("status", {}).get("name", "")
-                
-                assignee_raw = fields.get("assignee")
-                assignee = assignee_raw.get("name", "") if assignee_raw else ""
-                
+                assignee = fields.get("assignee", {}).get("name", "") if fields.get("assignee") else ""
                 priority = fields.get("priority", {}).get("name", "")
                 created = fields.get("created", "")
                 duedate = fields.get("duedate", "")
                 
-                # Özel Alan: İlgili Stajyerler (customfield_10601)
+                # Özel Alan: İlgili Stajyerler
                 stajyerler_raw = fields.get("customfield_10601")
                 stajyerler = ""
                 if stajyerler_raw:
                     if isinstance(stajyerler_raw, list):
-                        stajyer_names = [s.get("name", "") for s in stajyerler_raw if isinstance(s, dict)]
-                        stajyerler = ",".join(stajyer_names)
+                        stajyerler = ",".join([s.get("name", "") for s in stajyerler_raw if isinstance(s, dict)])
                     elif isinstance(stajyerler_raw, dict):
                         stajyerler = stajyerler_raw.get("name", "")
 
-                # Etiketler
                 labels = ",".join(fields.get("labels", []))
-
-                # Zaman Takibi
+                
                 timetracking = fields.get("timetracking", {})
                 original_estimate = timetracking.get("originalEstimateSeconds", "")
                 time_spent = timetracking.get("timeSpentSeconds", "")
 
-                # --- YENİ: ATTACHMENTS İŞLEME ---
                 attachments_raw = fields.get("attachment", [])
                 attachment_urls = []
-                
                 if attachments_raw:
                     for att in attachments_raw:
-                        # Format: "DosyaAdi::URL"
                         filename = att.get("filename", "unknown")
                         content_url = att.get("content", "")
                         attachment_urls.append(f"{filename}::{content_url}")
-                
-                # Linkleri " | " ile ayırarak tek hücreye yaz
                 attachments_str = " | ".join(attachment_urls)
 
-                # Satırı Yaz
                 writer.writerow([
                     key, summary, description, status, assignee, 
                     priority, created, duedate, stajyerler, 
                     labels, original_estimate, time_spent, attachments_str
                 ])
 
-        print(f"✅ Jira'dan sorgu ile eşleşen --{len(issues)}-- issue çekildi.")
-        #print(f"🆕 '{OUTPUT_FILE}' dosyası güncellendi (Ekler Dahil).")
+        print(f"✅ Jira'dan {len(issues)} kayıt başarıyla CSV'ye aktarıldı.")
         return len(issues)
 
     except Exception as e:
-        print(f"❌ Hata oluştu: {e}")
+        print(f"❌ KRİTİK HATA (fetch_jira_csv): {e}")
+        if debug_mode:
+            import traceback
+            traceback.print_exc()
         return 0
 
 if __name__ == "__main__":
-    fetch_jira_csv()
+    # Test amaçlı manuel çalıştırma
+    fetch_jira_csv(debug_mode=True)

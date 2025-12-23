@@ -38,9 +38,21 @@ TEAM_NAME_MAP = {}
 
 JQL = "" 
 
+# --- [YENİ] DEBUG YÖNETİMİ ---
+DEBUG_MODE = False
+if "--debug" in sys.argv:
+    DEBUG_MODE = True
+    print("\n🐞 DEBUG MODU AKTİF: Tüm adımlar detaylı loglanacak...\n")
+
+def debug_log(msg):
+    """Sadece debug modu açıksa ekrana basar."""
+    if DEBUG_MODE:
+        print(f"   🐛 [DEBUG] {msg}")
+
 def load_config():
     global ASSIGNEE_MAP, TEAM_PROJECT_MAP, TEAM_NAME_MAP, JQL
     
+    debug_log(f"Config dosyası okunuyor: {CONFIG_FILE}")
     if not os.path.exists(CONFIG_FILE):
         print(f"⚠️ UYARI: {CONFIG_FILE} bulunamadı! Varsayılan ayarlar kullanılacak.")
         return
@@ -50,9 +62,12 @@ def load_config():
             data = json.load(f)
         
         if "settings" in data and "default_jql" in data["settings"]:
-            if len(sys.argv) <= 1: 
+            # Eğer komut satırından JQL gelmediyse config'den al
+            # (sys.argv kontrolünü genişlettik ki --debug vb. argümanlarla karışmasın)
+            potential_jql = [arg for arg in sys.argv if not arg.startswith("-") and not arg.endswith(".py")]
+            if not potential_jql: 
                 JQL = data["settings"]["default_jql"]
-                print(f"⚙️ Config dosyasından JQL yüklendi: {JQL}")
+                debug_log(f"Config dosyasından JQL yüklendi: {JQL}")
 
         if "user_mappings" in data:
             for item in data["user_mappings"]:
@@ -69,7 +84,7 @@ def load_config():
                     if g_proj_id: TEAM_PROJECT_MAP[j_team] = g_proj_id
                     if f_name: TEAM_NAME_MAP[j_team] = f_name
             
-        #print("✅ Ayarlar ve veriler config dosyasından başarıyla yüklendi.")
+        debug_log(f"Config Yüklendi: {len(TEAM_PROJECT_MAP)} takım, {len(ASSIGNEE_MAP)} kullanıcı eşleşmesi var.")
 
     except Exception as e:
         print(f"❌ Config yükleme hatası: {e}")
@@ -78,9 +93,14 @@ def load_config():
 load_config()
 
 # --- ARGÜMAN YÖNETİMİ ---
-if len(sys.argv) > 1: JQL = sys.argv[1]
+# JQL'i argümanlardan ayıkla (flag olmayan ilk argüman)
+potential_args = [arg for arg in sys.argv if not arg.startswith("-") and not arg.endswith(".py")]
+if len(potential_args) > 0:
+    JQL = potential_args[0]
+
 MODE = "--preview"
-if len(sys.argv) > 2: MODE = sys.argv[2]
+if "--execute" in sys.argv:
+    MODE = "--execute"
 
 HEADERS = {
     "PRIVATE-TOKEN": GITLAB_TOKEN,
@@ -93,11 +113,16 @@ UPLOADED_FILE = os.path.join(CSV_FOLDER, "jira_uploaded.csv")
 # ------------------- ŞABLON YÖNETİMİ -------------------
 def load_template(template_name, context):
     template_path = os.path.join("templates", template_name)
+    debug_log(f"Şablon aranıyor: {template_path}")
+    
     if not os.path.exists(template_path):
+        debug_log("Şablon bulunamadı, varsayılan metin kullanılıyor.")
         return f"# {context.get('title')}\n\n{context.get('orig_desc')}"
     try:
         with open(template_path, "r", encoding="utf-8") as f:
-            return f.read().format(**context)
+            content = f.read()
+            debug_log(f"Şablon okundu ({len(content)} karakter).")
+            return content.format(**context)
     except Exception as e:
         print(f"❌ Şablon hatası: {e}")
         return f"# {context.get('title')}\n\n{context.get('orig_desc')}"
@@ -105,6 +130,7 @@ def load_template(template_name, context):
 # ------------------- ROBUST CSV OKUYUCU -------------------
 def read_jira_csv_robustly(filename):
     issues = []
+    debug_log(f"CSV okunuyor: {filename}")
     try:
         with open(filename, encoding="utf-8-sig") as f:
             reader = csv.reader(f)
@@ -125,6 +151,8 @@ def read_jira_csv_robustly(filename):
                 
                 issue["_team_list"] = list(set(stajyer_list_raw))
                 issues.append(issue)
+        
+        debug_log(f"CSV okuma tamamlandı. {len(issues)} satır işlendi.")
                 
     except FileNotFoundError:
         print(f"❌ Hata: '{filename}' dosyası bulunamadı.")
@@ -142,7 +170,7 @@ def process_attachments_for_gitlab(attachments_str, target_project_id):
     markdown_links = []
     file_entries = attachments_str.split(" | ")
     
-    print(f"   📎 {len(file_entries)} adet dosya işleniyor...")
+    debug_log(f"📎 Ekler işleniyor: {len(file_entries)} adet dosya tespit edildi.")
 
     for entry in file_entries:
         if "::" not in entry: continue
@@ -152,6 +180,7 @@ def process_attachments_for_gitlab(attachments_str, target_project_id):
         download_url = download_url.strip()
 
         try:
+            debug_log(f"İndiriliyor: {filename}")
             with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
                 with requests.get(download_url, headers=JIRA_AUTH_HEADERS, stream=True) as r:
                     r.raise_for_status()
@@ -161,6 +190,7 @@ def process_attachments_for_gitlab(attachments_str, target_project_id):
             
             gl_upload_url = f"https://gitlab.com/api/v4/projects/{target_project_id}/uploads"
             
+            debug_log(f"GitLab'e yükleniyor (PID: {target_project_id})...")
             with open(tmp_path, 'rb') as f:
                 files = {'file': (filename, f)}
                 upload_headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
@@ -173,9 +203,10 @@ def process_attachments_for_gitlab(attachments_str, target_project_id):
                 md_link = uploaded_data.get("markdown")
                 if md_link:
                     markdown_links.append(md_link)
-                    print(f"     ✅ Yüklendi: {filename}")
+                    if DEBUG_MODE: print(f"     ✅ Yüklendi: {filename}")
             else:
                 print(f"     ⚠️ Yükleme Hatası ({filename}): {up_resp.status_code}")
+                debug_log(f"Hata detayı: {up_resp.text}")
 
         except Exception as e:
             print(f"     ❌ Dosya İşleme Hatası ({filename}): {e}")
@@ -205,20 +236,26 @@ def seconds_to_gitlab_duration(seconds):
 def link_issues(parent_project_id, parent_iid, target_project_id, target_iid):
     url = f"https://gitlab.com/api/v4/projects/{parent_project_id}/issues/{parent_iid}/links"
     data = {"target_project_id": target_project_id, "target_issue_iid": target_iid, "link_type": "relates_to"}
-    requests.post(url, headers={"PRIVATE-TOKEN": GITLAB_TOKEN, "Content-Type": "application/json"}, json=data)
+    resp = requests.post(url, headers={"PRIVATE-TOKEN": GITLAB_TOKEN, "Content-Type": "application/json"}, json=data)
+    if resp.status_code not in [200, 201]:
+        debug_log(f"Linkleme hatası oluştu: {resp.status_code} - {resp.text}")
 
 def find_or_create_group_milestone(title):
+    debug_log(f"Milestone kontrol ediliyor: {title}")
     url = f"https://gitlab.com/api/v4/groups/{GROUP_ID}/milestones"
     r = requests.get(url, headers={"PRIVATE-TOKEN": GITLAB_TOKEN})
     if r.status_code == 200:
         for m in r.json():
             if m["title"].strip().lower() == title.strip().lower():
                 return m
+    
     payload = {"title": title}
     r = requests.post(url, headers={"PRIVATE-TOKEN": GITLAB_TOKEN, "Content-Type": "application/json"}, json=payload)
     if r.status_code == 201:
         print(f"✨ Issue Milestone'u oluşturuldu: {title}")
         return r.json()
+    
+    debug_log(f"Milestone hatası: {r.status_code} - {r.text}")
     return None
 
 def get_readable_team_names(team_list):
@@ -233,13 +270,22 @@ def get_readable_team_names(team_list):
 if __name__ == "__main__":
     
     if MODE == "--preview":
-        #print(f"📡 Arayüzden Gelen JQL Kullanılıyor: {JQL}")
+        if DEBUG_MODE: print(f"📡 ÖN İZLEME MODU (JQL: {JQL})")
+        
+        # --- [YENİ] BAĞLANTI TESTİ ---
         try:
+            debug_log("Jira Bağlantısı test ediliyor...")
             test_resp = requests.get(f"{JIRA_URL}/rest/api/2/myself", headers=JIRA_AUTH_HEADERS)
-            if test_resp.status_code == 200: print("✅ Jira API Bağlantısı Başarılı.")
-        except: pass
+            if test_resp.status_code == 200: 
+                debug_log("✅ Jira API Bağlantısı Başarılı.")
+            else:
+                print(f"❌ Jira API Bağlantı Hatası: {test_resp.status_code}")
+                if DEBUG_MODE: print(test_resp.text)
+        except Exception as e: 
+            print(f"❌ Jira'ya erişilemiyor: {e}")
 
-        new_issue_count = fetch_jira_csv(JQL)
+        # debug_mode parametresini gönderiyoruz
+        new_issue_count = fetch_jira_csv(JQL, debug_mode=DEBUG_MODE)
         
         if new_issue_count == 0:
             print("\n---------------------------------------------------------")
@@ -276,10 +322,11 @@ if __name__ == "__main__":
         
         # Eğer argüman olarak şablon adı geldiyse onu al, yoksa varsayılanı kullan
         SELECTED_TEMPLATE = "standard_template.md"
-        if len(sys.argv) > 3:
-            SELECTED_TEMPLATE = sys.argv[3]
-            print(f"🎨 Seçilen Şablon Kullanılıyor: {SELECTED_TEMPLATE}")
-        # --- YENİ EKLENEN KISIM BİTİŞİ ---
+        # .md ile biten argümanı bul
+        for arg in sys.argv:
+            if arg.endswith(".md"): SELECTED_TEMPLATE = arg
+            
+        if DEBUG_MODE: print(f"🎨 Seçilen Şablon: {SELECTED_TEMPLATE}")
 
         if not os.path.exists(TO_ADD_FILE):
              print("❌ HATA: Önce sorgulama yapmalısınız (jira_to_add.csv yok).")
@@ -306,6 +353,7 @@ if __name__ == "__main__":
             print(f"➡️  Tespit Edilen Takımlar: {', '.join(takim_isimleri) if takim_isimleri else 'Yok'}")
             
             # --- VERİ HAZIRLIĞI ---
+            debug_log("Veri şablon için hazırlanıyor...")
             template_context = {
                 "jira_key": jira_key,
                 "title": title,
@@ -343,6 +391,7 @@ if __name__ == "__main__":
             
             json_headers = {"PRIVATE-TOKEN": GITLAB_TOKEN, "Content-Type": "application/json"}
 
+            debug_log(f"Master Issue gönderiliyor (PID: {MASTER_PROJECT_ID})...")
             m_resp = requests.post(f"https://gitlab.com/api/v4/projects/{MASTER_PROJECT_ID}/issues", headers=json_headers, json=master_data)
             
             if m_resp.status_code == 201:
@@ -350,7 +399,8 @@ if __name__ == "__main__":
                 m_iid = m_issue["iid"]
                 print(f"✅ Ana Issue Oluşturuldu: {title}")
             else:
-                print(f"❌ Master issue oluşturulamadı: {m_resp.text}")
+                print(f"❌ Master issue oluşturulamadı: {m_resp.status_code}")
+                debug_log(f"Hata Detayı: {m_resp.text}")
                 continue 
             
             # --- 3. Child Issues (GÜNCELLENDİ) ---
@@ -363,8 +413,6 @@ if __name__ == "__main__":
                 c_assignee = ASSIGNEE_MAP.get(team)
                 
                 # --- GÜNCEL CHILD ISSUE FORMATI ---
-                # 1. Başlık küçültüldü (H3 - ###)
-                # 2. Master Template'deki tablo buraya da eklendi
                 c_desc = (
                     f"### 🔗 [{jira_key}] {title} (Takım Kopyası)\n\n"
                     f"> **⚠️ DİKKAT:** Bu görev, ana göreve bağlı bir alt görevdir. Kontrol listesi (DoD), dosya ekleri ve detaylı ilerleme takibi için lütfen aşağıdaki **ANA GÖREV** linkini kullanınız.\n"
@@ -394,6 +442,7 @@ if __name__ == "__main__":
                 if c_assignee: c_data["assignee_ids"] = [c_assignee]
                 if milestone: c_data["milestone_id"] = milestone["id"]
 
+                debug_log(f"Child Issue gönderiliyor (Takım: {p_name}, PID: {proj_id})...")
                 c_resp = requests.post(f"https://gitlab.com/api/v4/projects/{proj_id}/issues", headers=json_headers, json=c_data)
                 
                 if c_resp.status_code == 201:
@@ -402,6 +451,7 @@ if __name__ == "__main__":
                     print(f"  ✅ -> Child Issue Oluşturuldu ({p_name}) ve linklendi.")
                 else:
                     print(f"  ⚠️ Child Issue hatası: {c_resp.status_code}")
+                    debug_log(f"Hata Detayı: {c_resp.text}")
 
             # --- 4. CSV Güncelle ---
             if os.path.exists(UPLOADED_FILE) and os.path.getsize(UPLOADED_FILE) > 0:
