@@ -27,6 +27,7 @@
     }
   ],
   "settings": {
-    "default_jql": "project = GYT..."
+    "default_jql": "project = GYT...",
+    "priorities": ["Ölümcül", "Majör", "Kritik", "Minör", "Düşük"]
   }
 }
