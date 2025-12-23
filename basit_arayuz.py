@@ -229,20 +229,20 @@ class DualSyncApp(ctk.CTk):
         self.entry_key.pack(side="left", padx=(0, 10))
 
         ctk.CTkLabel(row1, text="Zaman:", font=self.font_ui, text_color="black").pack(side="left", padx=(0, 2))
-        self.combo_time = ctk.CTkComboBox(row1, values=["Seçiniz...", "Son 24 Saat", "Son 7 Gün", "Son 15 Gün", "Son 30 Gün", "Tüm Zamanlar"], width=110)
+        self.combo_time = ctk.CTkComboBox(row1, values=["Seçiniz...","Son 1 Saat", "Son 6 Saat", "Son 12 Saat", "Son 24 Saat", "Son 7 Gün", "Son 15 Gün", "Son 30 Gün", "Tüm Zamanlar"], width=110)
         self.combo_time.pack(side="left", padx=(0, 10))
         self.combo_time.set("Seçiniz...")
 
-        ctk.CTkLabel(row1, text="Etiket:", font=self.font_ui, text_color="black").pack(side="left", padx=(0, 2))
+        ctk.CTkLabel(row1, text="Label:", font=self.font_ui, text_color="black").pack(side="left", padx=(0, 2))
         self.entry_label = ctk.CTkEntry(row1, placeholder_text="frontend", width=90)
         self.entry_label.pack(side="left", padx=(0, 10))
 
-        ctk.CTkLabel(row1, text="Öncelik:", font=self.font_ui, text_color="black").pack(side="left", padx=(0, 5))
+        ctk.CTkLabel(row1, text="Priority:", font=self.font_ui, text_color="black").pack(side="left", padx=(0, 5))
         p_frame = ctk.CTkFrame(row1, fg_color="white", corner_radius=6, border_width=1, border_color="#CCC")
         p_frame.pack(side="left", fill="x", padx=(0, 10))
         
         self.vars_priority = {}
-        priorities = ["High", "Medium", "Low"]
+        priorities = ["Ölümcül", "Majör", "Kritik", "Minör", "Düşük"]
 
         def on_prio_change(selected_p):
             if self.vars_priority[selected_p].get():
@@ -302,7 +302,7 @@ class DualSyncApp(ctk.CTk):
         ctk.CTkButton(s_head, text="Temizle", width=50, height=20, font=("Roboto", 10), fg_color="#DDD", text_color="black", hover_color="#CCC", command=lambda: self.toggle_all(self.vars_status, False)).pack(side="right", padx=2)
 
         self.vars_status = {}
-        statuses = ["To Do", "In Progress", "Done", "Backlog", "In Review"]
+        statuses = ["Başlanmamış", "Devam", "Çözülmüş"]
         s_box_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
         s_box_frame.pack(fill="x", padx=5)
         for s in statuses:
@@ -316,11 +316,11 @@ class DualSyncApp(ctk.CTk):
         type_frame.pack(side="left", fill="x", expand=True, padx=(0, 0), ipady=5)
         t_head = ctk.CTkFrame(type_frame, fg_color="transparent", height=20)
         t_head.pack(fill="x", padx=5, pady=2)
-        ctk.CTkLabel(t_head, text="Tipler", font=("Roboto", 12, "bold"), text_color="gray").pack(side="left")
+        ctk.CTkLabel(t_head, text="Type", font=("Roboto", 12, "bold"), text_color="gray").pack(side="left")
         ctk.CTkButton(t_head, text="Hepsini Seç", width=60, height=20, font=("Roboto", 10), fg_color="#DDD", text_color="black", hover_color="#CCC", command=lambda: self.toggle_all(self.vars_type, True)).pack(side="right")
         ctk.CTkButton(t_head, text="Temizle", width=50, height=20, font=("Roboto", 10), fg_color="#DDD", text_color="black", hover_color="#CCC", command=lambda: self.toggle_all(self.vars_type, False)).pack(side="right", padx=2)
         self.vars_type = {}
-        types = ["Bug", "Task", "Story", "Sub-task", "Epic"]
+        types = ["Araştırma", "Dokümantasyon", "Görev", "Sunum", "Faaliyet", "Sub-task"]
         t_box_frame = ctk.CTkFrame(type_frame, fg_color="transparent")
         t_box_frame.pack(fill="x", padx=5)
         for t in types:
@@ -354,7 +354,7 @@ class DualSyncApp(ctk.CTk):
         if proj: parts.append(f"project = {proj}")
 
         # Zaman
-        time_map = {"Son 24 Saat": "-24h", "Son 7 Gün": "-7d", "Son 15 Gün": "-15d", "Son 30 Gün": "-30d"}
+        time_map = {"Son 1 Saat": "-1h", "Son 6 Saat": "-6h", "Son 12 Saat": "-12h", "Son 24 Saat": "-24h", "Son 7 Gün": "-7d", "Son 15 Gün": "-15d", "Son 30 Gün": "-30d"}
         sel_time = self.combo_time.get()
         if sel_time in time_map: parts.append(f"created >= {time_map[sel_time]}")
 
@@ -447,8 +447,8 @@ class DualSyncApp(ctk.CTk):
             t_head.columnconfigure(i, weight=1 if i==3 else 3)
             ctk.CTkLabel(t_head, text=t, font=("Roboto", 12, "bold"), text_color="white").grid(row=0, column=i, sticky="ew")
 
-        self.team_scroll_container = ctk.CTkScrollableFrame(self.team_frame, height=120, fg_color="transparent") 
-        self.team_scroll_container.pack(fill="x", padx=5, pady=(0, 5))
+        self.team_scroll_container = ctk.CTkScrollableFrame(self.team_frame, height=50, fg_color="transparent") 
+        self.team_scroll_container.pack(fill="x", padx=5, pady=(0,5))
         self.team_entries = []
 
         
